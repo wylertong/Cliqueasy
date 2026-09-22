@@ -78,3 +78,55 @@ class Session(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class SessionInvite(models.Model):
+    class Method(models.TextChoices):
+        IN_APP_LINK = "in_app_link", "In-App Link"
+        SMS = "sms", "SMS"                                    # unreachable this phase — no delivery mechanism yet
+        GROUPCHAT_LINK = "groupchat_link", "Group Chat Link"  # unreachable this phase
+
+    session = models.ForeignKey(Session, on_delete=models.CASCADE, related_name="invites")
+    invited_category = models.ForeignKey(
+        "categories.Category", on_delete=models.CASCADE, null=True, blank=True,
+        related_name="session_invites",
+    )
+    invited_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="session_invites",
+    )
+    method = models.CharField(max_length=20, choices=Method.choices, default=Method.IN_APP_LINK)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["session", "invited_user"], name="unique_invite_per_user_per_session"),
+            models.UniqueConstraint(
+                fields=["session", "invited_category"], name="unique_invite_per_category_per_session"
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(invited_category__isnull=False, invited_user__isnull=True)
+                    | models.Q(invited_category__isnull=True, invited_user__isnull=False)
+                ),
+                name="exactly_one_invite_target",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = []
+        has_category = self.invited_category_id is not None
+        has_user = self.invited_user_id is not None
+        if has_category == has_user:
+            errors.append("Exactly one of invited category or invited user must be set.")
+        if self.session_id:
+            status = Session.objects.filter(pk=self.session_id).values_list("status", flat=True).first()
+            if status in (Session.Status.CANCELLED, Session.Status.COMPLETED):
+                errors.append("This session is cancelled or completed and can no longer receive new invites.")
+        if errors:
+            raise ValidationError({"__all__": errors})
+
+    def __str__(self):
+        target = self.invited_user or self.invited_category
+        return f"Invite to {self.session} for {target}"
