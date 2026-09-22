@@ -105,7 +105,7 @@ class SessionInvite(models.Model):
                 fields=["session", "invited_category"], name="unique_invite_per_category_per_session"
             ),
             models.CheckConstraint(
-                check=(
+                condition=(
                     models.Q(invited_category__isnull=False, invited_user__isnull=True)
                     | models.Q(invited_category__isnull=True, invited_user__isnull=False)
                 ),

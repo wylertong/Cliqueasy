@@ -159,6 +159,14 @@ class SessionInviteUniquenessTests(TestCase):
             with transaction.atomic():
                 SessionInvite.objects.create(session=session, invited_category=category)
 
+    def test_two_category_only_invites_on_same_session_coexist(self):
+        session = make_session()
+        category_a = Category.objects.create(creator=session.creator, name="Roster A")
+        category_b = Category.objects.create(creator=session.creator, name="Roster B")
+        SessionInvite.objects.create(session=session, invited_category=category_a)
+        SessionInvite.objects.create(session=session, invited_category=category_b)
+        self.assertEqual(session.invites.count(), 2)
+
 
 class SessionInviteDefaultsTests(TestCase):
     def test_method_defaults_to_in_app_link(self):
