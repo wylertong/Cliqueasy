@@ -11,8 +11,10 @@
         <a href="/" class="font-semibold text-lg">Cliquey</a>
         <div class="flex gap-4 items-center text-sm">
             {% if user.is_authenticated %}
-                <a href="{% url 'sessions:session_list' %}" class="hover:text-indigo-600">Sessions</a>
-                <a href="{% url 'categories:category_list' %}" class="hover:text-indigo-600">Categories</a>
+                {% url 'sessions:session_list' as sessions_url %}
+                {% if sessions_url %}<a href="{{ sessions_url }}" class="hover:text-indigo-600">Sessions</a>{% endif %}
+                {% url 'categories:category_list' as categories_url %}
+                {% if categories_url %}<a href="{{ categories_url }}" class="hover:text-indigo-600">Categories</a>{% endif %}
                 <a href="{% url 'accounts:profile' %}" class="hover:text-indigo-600">Profile</a>
                 <form method="post" action="{% url 'accounts:logout' %}">
                     {% csrf_token %}
