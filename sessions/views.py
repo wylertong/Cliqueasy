@@ -23,7 +23,7 @@ class HomeView(LoginRequiredMixin, TemplateView):
                 Q(invites__invited_user=self.request.user)
                 | Q(invites__invited_category__members__user=self.request.user)
             )
-            .exclude(status=Session.Status.CANCELLED)
+            .exclude(status__in=[Session.Status.CANCELLED, Session.Status.COMPLETED])
             .exclude(creator=self.request.user)
             .distinct()
         )

@@ -194,6 +194,24 @@ class HomeViewOpenToJoinTests(TestCase):
         self.assertContains(response, "My Sessions")
         self.assertContains(response, "Coming soon")
 
+    def test_completed_session_excluded(self):
+        session = self.make_session(title="Completed Session")
+        SessionInvite.objects.create(session=session, invited_user=self.viewer)
+        Session.objects.filter(pk=session.pk).update(status=Session.Status.COMPLETED)
+        self.client.login(username="viewer", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertNotContains(response, "Completed Session")
+
+    def test_dual_path_invite_appears_once(self):
+        session = self.make_session(title="Dual Path Session")
+        category = Category.objects.create(creator=self.creator, name="Dual Roster")
+        CategoryMember.objects.create(category=category, user=self.viewer)
+        SessionInvite.objects.create(session=session, invited_user=self.viewer)
+        SessionInvite.objects.create(session=session, invited_category=category)
+        self.client.login(username="viewer", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertEqual(list(response.context["open_to_join_sessions"]).count(session), 1)
+
 
 class LoginRedirectTests(TestCase):
     def test_login_redirects_to_home(self):
