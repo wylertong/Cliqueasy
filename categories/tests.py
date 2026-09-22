@@ -36,3 +36,10 @@ class CategoryScopingTests(TestCase):
         response = self.client.post(remove_url)
         self.assertEqual(response.status_code, 302)
         self.assertFalse(CategoryMember.objects.filter(category=self.category, user=self.other).exists())
+
+    def test_duplicate_name_shows_error_not_crash(self):
+        self.client.login(username="owner", password="testpass123")
+        response = self.client.post(reverse("categories:category_create"), {"name": "USTA Roster"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "already have a category")
+        self.assertEqual(Category.objects.filter(creator=self.owner, name="USTA Roster").count(), 1)

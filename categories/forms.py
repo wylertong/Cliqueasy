@@ -11,6 +11,16 @@ class CategoryForm(forms.ModelForm):
         model = Category
         fields = ["name"]
 
+    def __init__(self, *args, creator=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.creator = creator
+
+    def clean_name(self):
+        name = self.cleaned_data["name"]
+        if self.creator and Category.objects.filter(creator=self.creator, name=name).exists():
+            raise forms.ValidationError("You already have a category with this name. Choose a new name.")
+        return name
+
 
 class AddMemberForm(forms.Form):
     user = forms.ModelChoiceField(queryset=User.objects.none())

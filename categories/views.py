@@ -35,6 +35,11 @@ class CategoryCreateView(LoginRequiredMixin, CreateView):
     template_name = "categories/category_form.html"
     success_url = reverse_lazy("categories:category_list")
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["creator"] = self.request.user
+        return kwargs
+
     def form_valid(self, form):
         form.instance.creator = self.request.user
         return super().form_valid(form)
