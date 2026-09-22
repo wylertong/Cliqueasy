@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+    <h1 class="text-xl font-semibold">Sessions</h1>
+    <a href="{% url 'sessions:session_create' %}" class="bg-indigo-600 text-white px-3 py-1.5 rounded text-sm">New session</a>
+</div>
+<ul class="space-y-2">
+    {% for session in sessions %}
+        <li class="border border-gray-200 rounded p-3">
+            <a href="{% url 'sessions:session_detail' session.pk %}" class="font-medium hover:text-indigo-600">{{ session.title }}</a>
+            <div class="text-sm text-gray-500">{{ session.date_time }} · {{ session.location_text }} · {{ session.get_status_display }}</div>
+        </li>
+    {% empty %}
+        <li class="text-gray-500">No sessions yet.</li>
+    {% endfor %}
+</ul>
+{% endblock %}

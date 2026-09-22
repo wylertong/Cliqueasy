@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-1">{{ session.title }}</h1>
+<p class="text-sm text-gray-500 mb-4">Created by {{ session.creator }}</p>
+<dl class="space-y-2 mb-4">
+    <div><dt class="text-sm text-gray-500">Type</dt><dd>{{ session.get_session_type_display }}</dd></div>
+    <div><dt class="text-sm text-gray-500">When</dt><dd>{{ session.date_time }}</dd></div>
+    <div><dt class="text-sm text-gray-500">Where</dt><dd>{{ session.location_text }}</dd></div>
+    <div><dt class="text-sm text-gray-500">Target size</dt><dd>{{ session.target_size }} (0 confirmed)</dd></div>
+    <div><dt class="text-sm text-gray-500">Status</dt><dd>{{ session.get_status_display }}</dd></div>
+    <div><dt class="text-sm text-gray-500">Waitlist mode</dt><dd>{{ session.get_waitlist_mode_display }}</dd></div>
+    <div><dt class="text-sm text-gray-500">Offer window</dt><dd>{{ session.waitlist_offer_window_minutes }} minutes</dd></div>
+    {% if session.description %}
+        <div><dt class="text-sm text-gray-500">Description</dt><dd>{{ session.description }}</dd></div>
+    {% endif %}
+</dl>
+{% if session.creator == user %}
+    <a href="{% url 'sessions:session_edit' session.pk %}" class="text-indigo-600">Edit session</a>
+{% endif %}
+{% endblock %}
