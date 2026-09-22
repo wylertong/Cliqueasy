@@ -17,4 +17,32 @@
 {% if session.creator == user %}
     <a href="{% url 'sessions:session_edit' session.pk %}" class="text-indigo-600">Edit session</a>
 {% endif %}
+{% if session.creator == user %}
+<section class="mt-6 border-t border-gray-200 pt-4">
+    <h2 class="text-lg font-semibold mb-2">Invites</h2>
+    <ul class="space-y-1 mb-4 text-sm text-gray-600">
+        {% for invite in session.invites.all %}
+            <li>{% if invite.invited_user %}{{ invite.invited_user }}{% else %}Category: {{ invite.invited_category.name }}{% endif %}</li>
+        {% empty %}
+            <li class="text-gray-500">No invites sent yet.</li>
+        {% endfor %}
+    </ul>
+    {% if session.status != "cancelled" and session.status != "completed" %}
+        <div class="grid gap-4 sm:grid-cols-2">
+            <form method="post" action="{% url 'sessions:invite_category' session.pk %}">
+                {% csrf_token %}
+                {{ invite_category_form.as_p }}
+                <button type="submit" class="bg-indigo-600 text-white px-3 py-1.5 rounded text-sm">Invite category</button>
+            </form>
+            <form method="post" action="{% url 'sessions:invite_users' session.pk %}">
+                {% csrf_token %}
+                {{ invite_users_form.as_p }}
+                <button type="submit" class="bg-indigo-600 text-white px-3 py-1.5 rounded text-sm">Invite people</button>
+            </form>
+        </div>
+    {% else %}
+        <p class="text-sm text-gray-500">This session is {{ session.get_status_display|lower }} — no new invites can be sent.</p>
+    {% endif %}
+</section>
+{% endif %}
 {% endblock %}

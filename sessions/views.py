@@ -1,9 +1,13 @@
+from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
+from django.core.exceptions import ValidationError
+from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse_lazy
+from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
-from .forms import SessionForm
-from .models import Session
+from .forms import InviteCategoryForm, InviteUsersForm, SessionForm
+from .models import Session, SessionInvite
 
 
 class SessionListView(LoginRequiredMixin, ListView):
@@ -18,6 +22,13 @@ class SessionDetailView(LoginRequiredMixin, DetailView):
     # Phase 1 shows all fields plainly to any logged-in user — the spec's per-viewer
     # visibility rules (see "Implementation note: participant visibility") don't apply
     # until SessionParticipant exists and there's an actual roster to gate.
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        if self.object.creator == self.request.user:
+            context["invite_category_form"] = InviteCategoryForm(session=self.object)
+            context["invite_users_form"] = InviteUsersForm(session=self.object)
+        return context
 
 
 class SessionCreateView(LoginRequiredMixin, CreateView):
@@ -43,3 +54,34 @@ class SessionUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
 
     def get_success_url(self):
         return reverse_lazy("sessions:session_detail", args=[self.object.pk])
+
+
+class InviteCategoryView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        session = get_object_or_404(Session, pk=pk, creator=request.user)
+        form = InviteCategoryForm(request.POST, session=session)
+        if form.is_valid():
+            invite = SessionInvite(session=session, invited_category=form.cleaned_data["category"])
+            try:
+                invite.full_clean()
+            except ValidationError as e:
+                messages.error(request, " ".join(e.messages))
+            else:
+                invite.save()
+        return redirect("sessions:session_detail", pk=session.pk)
+
+
+class InviteUsersView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        session = get_object_or_404(Session, pk=pk, creator=request.user)
+        form = InviteUsersForm(request.POST, session=session)
+        if form.is_valid():
+            for invited_user in form.cleaned_data["users"]:
+                invite = SessionInvite(session=session, invited_user=invited_user)
+                try:
+                    invite.full_clean()
+                except ValidationError as e:
+                    messages.error(request, " ".join(e.messages))
+                    break
+                invite.save()
+        return redirect("sessions:session_detail", pk=session.pk)

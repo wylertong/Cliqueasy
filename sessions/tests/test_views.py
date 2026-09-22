@@ -3,7 +3,8 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from sessions.models import Session
+from categories.models import Category
+from sessions.models import Session, SessionInvite
 
 User = get_user_model()
 
@@ -67,3 +68,75 @@ class SessionUpdateViewTests(TestCase):
         self.assertEqual(response.status_code, 200)  # re-renders form with error
         self.session.refresh_from_db()
         self.assertEqual(self.session.waitlist_mode, Session.WaitlistMode.FCFS_BLAST)
+
+
+class InviteCategoryViewTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username="owner2", email="owner2@example.com", password="testpass123")
+        self.other = User.objects.create_user(username="other2", email="other2@example.com", password="testpass123")
+        self.session = Session.objects.create(
+            creator=self.owner, title="Sunday Doubles", session_type=Session.SessionType.DOUBLES,
+            date_time=timezone.now() + timezone.timedelta(days=3),
+            location_text="Sunnyvale Tennis Center", target_size=4,
+        )
+        self.category = Category.objects.create(creator=self.owner, name="Roster")
+
+    def test_creator_can_invite_category(self):
+        self.client.login(username="owner2", password="testpass123")
+        response = self.client.post(reverse("sessions:invite_category", args=[self.session.pk]), {"category": self.category.pk})
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(SessionInvite.objects.filter(session=self.session, invited_category=self.category).exists())
+
+    def test_non_creator_cannot_invite_category(self):
+        self.client.login(username="other2", password="testpass123")
+        response = self.client.post(reverse("sessions:invite_category", args=[self.session.pk]), {"category": self.category.pk})
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(SessionInvite.objects.filter(session=self.session).exists())
+
+    def test_already_invited_category_is_not_duplicated(self):
+        SessionInvite.objects.create(session=self.session, invited_category=self.category)
+        self.client.login(username="owner2", password="testpass123")
+        response = self.client.post(reverse("sessions:invite_category", args=[self.session.pk]), {"category": self.category.pk})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(SessionInvite.objects.filter(session=self.session, invited_category=self.category).count(), 1)
+
+    def test_cannot_invite_category_to_cancelled_session(self):
+        Session.objects.filter(pk=self.session.pk).update(status=Session.Status.CANCELLED)
+        self.client.login(username="owner2", password="testpass123")
+        response = self.client.post(reverse("sessions:invite_category", args=[self.session.pk]), {"category": self.category.pk})
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SessionInvite.objects.filter(session=self.session).exists())
+
+
+class InviteUsersViewTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(username="owner3", email="owner3@example.com", password="testpass123")
+        self.other = User.objects.create_user(username="other3", email="other3@example.com", password="testpass123")
+        self.invitee1 = User.objects.create_user(username="invitee_a", email="invitee_a@example.com", password="testpass123")
+        self.invitee2 = User.objects.create_user(username="invitee_b", email="invitee_b@example.com", password="testpass123")
+        self.session = Session.objects.create(
+            creator=self.owner, title="Weeknight Singles", session_type=Session.SessionType.SINGLES,
+            date_time=timezone.now() + timezone.timedelta(days=2),
+            location_text="Fairbreigh Swim and Racket Club", target_size=2,
+        )
+
+    def test_creator_can_invite_multiple_users(self):
+        self.client.login(username="owner3", password="testpass123")
+        response = self.client.post(
+            reverse("sessions:invite_users", args=[self.session.pk]),
+            {"users": [self.invitee1.pk, self.invitee2.pk]},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(SessionInvite.objects.filter(session=self.session).count(), 2)
+
+    def test_non_creator_cannot_invite_users(self):
+        self.client.login(username="other3", password="testpass123")
+        response = self.client.post(reverse("sessions:invite_users", args=[self.session.pk]), {"users": [self.invitee1.pk]})
+        self.assertEqual(response.status_code, 404)
+
+    def test_cannot_invite_user_to_completed_session(self):
+        Session.objects.filter(pk=self.session.pk).update(status=Session.Status.COMPLETED)
+        self.client.login(username="owner3", password="testpass123")
+        response = self.client.post(reverse("sessions:invite_users", args=[self.session.pk]), {"users": [self.invitee1.pk]})
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SessionInvite.objects.filter(session=self.session).exists())
