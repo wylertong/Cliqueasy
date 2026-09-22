@@ -79,7 +79,7 @@ STORAGES = {
 }
 
 LOGIN_URL = "accounts:login"
-LOGIN_REDIRECT_URL = "sessions:session_list"
+LOGIN_REDIRECT_URL = "sessions:home"
 LOGOUT_REDIRECT_URL = "accounts:login"
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"

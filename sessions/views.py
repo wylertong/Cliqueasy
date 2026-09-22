@@ -1,13 +1,33 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse_lazy
 from django.views import View
-from django.views.generic import CreateView, DetailView, ListView, UpdateView
+from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView
 
 from .forms import InviteCategoryForm, InviteUsersForm, SessionForm
 from .models import Session, SessionInvite
+
+
+class HomeView(LoginRequiredMixin, TemplateView):
+    template_name = "sessions/home.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        # "My Sessions" (joined/waitlisted) needs SessionParticipant, which doesn't exist
+        # until Phase 3 — the template renders a static placeholder for that section.
+        context["open_to_join_sessions"] = (
+            Session.objects.filter(
+                Q(invites__invited_user=self.request.user)
+                | Q(invites__invited_category__members__user=self.request.user)
+            )
+            .exclude(status=Session.Status.CANCELLED)
+            .exclude(creator=self.request.user)
+            .distinct()
+        )
+        return context
 
 
 class SessionListView(LoginRequiredMixin, ListView):

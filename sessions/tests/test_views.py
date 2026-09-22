@@ -3,7 +3,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from categories.models import Category
+from categories.models import Category, CategoryMember
 from sessions.models import Session, SessionInvite
 
 User = get_user_model()
@@ -140,3 +140,63 @@ class InviteUsersViewTests(TestCase):
         response = self.client.post(reverse("sessions:invite_users", args=[self.session.pk]), {"users": [self.invitee1.pk]})
         self.assertEqual(response.status_code, 302)
         self.assertFalse(SessionInvite.objects.filter(session=self.session).exists())
+
+
+class HomeViewOpenToJoinTests(TestCase):
+    def setUp(self):
+        self.viewer = User.objects.create_user(username="viewer", email="viewer@example.com", password="testpass123")
+        self.creator = User.objects.create_user(username="creator2", email="creator2@example.com", password="testpass123")
+
+    def make_session(self, **overrides):
+        defaults = dict(
+            creator=self.creator, title="Session", session_type=Session.SessionType.DOUBLES,
+            date_time=timezone.now() + timezone.timedelta(days=3), location_text="Court", target_size=4,
+        )
+        defaults.update(overrides)
+        return Session.objects.create(**defaults)
+
+    def test_direct_invite_shows_on_home(self):
+        session = self.make_session(title="Direct Invite Session")
+        SessionInvite.objects.create(session=session, invited_user=self.viewer)
+        self.client.login(username="viewer", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertContains(response, "Direct Invite Session")
+
+    def test_category_invite_shows_on_home(self):
+        session = self.make_session(title="Category Invite Session")
+        category = Category.objects.create(creator=self.creator, name="Roster")
+        CategoryMember.objects.create(category=category, user=self.viewer)
+        SessionInvite.objects.create(session=session, invited_category=category)
+        self.client.login(username="viewer", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertContains(response, "Category Invite Session")
+
+    def test_cancelled_session_excluded(self):
+        session = self.make_session(title="Cancelled Session")
+        SessionInvite.objects.create(session=session, invited_user=self.viewer)
+        Session.objects.filter(pk=session.pk).update(status=Session.Status.CANCELLED)
+        self.client.login(username="viewer", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertNotContains(response, "Cancelled Session")
+
+    def test_own_created_session_excluded_even_if_self_invited_via_category(self):
+        session = self.make_session(title="Own Session", creator=self.viewer)
+        category = Category.objects.create(creator=self.viewer, name="Self Category")
+        CategoryMember.objects.create(category=category, user=self.viewer)
+        SessionInvite.objects.create(session=session, invited_category=category)
+        self.client.login(username="viewer", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertNotContains(response, "Own Session")
+
+    def test_my_sessions_placeholder_present(self):
+        self.client.login(username="viewer", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertContains(response, "My Sessions")
+        self.assertContains(response, "Coming soon")
+
+
+class LoginRedirectTests(TestCase):
+    def test_login_redirects_to_home(self):
+        User.objects.create_user(username="loginredir", email="loginredir@example.com", password="testpass123")
+        response = self.client.post(reverse("accounts:login"), {"username": "loginredir", "password": "testpass123"})
+        self.assertRedirects(response, reverse("sessions:home"))
