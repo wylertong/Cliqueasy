@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Your profile</h1>
+<dl class="space-y-2 mb-4">
+    <div><dt class="text-sm text-gray-500">Name</dt><dd>{{ user.first_name }} {{ user.last_name }}</dd></div>
+    <div><dt class="text-sm text-gray-500">Email</dt><dd>{{ user.email }}</dd></div>
+    <div><dt class="text-sm text-gray-500">Phone</dt><dd>{{ user.phone|default:"—" }}</dd></div>
+</dl>
+<a href="{% url 'accounts:profile_edit' %}" class="text-indigo-600">Edit profile</a>
+{% endblock %}
