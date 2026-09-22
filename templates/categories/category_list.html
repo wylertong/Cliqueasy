@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex justify-between items-center mb-4">
+    <h1 class="text-xl font-semibold">Categories</h1>
+    <a href="{% url 'categories:category_create' %}" class="bg-indigo-600 text-white px-3 py-1.5 rounded text-sm">New category</a>
+</div>
+<ul class="space-y-2">
+    {% for category in categories %}
+        <li class="border border-gray-200 rounded p-3">
+            <a href="{% url 'categories:category_detail' category.pk %}" class="font-medium hover:text-indigo-600">{{ category.name }}</a>
+        </li>
+    {% empty %}
+        <li class="text-gray-500">No categories yet.</li>
+    {% endfor %}
+</ul>
+{% endblock %}
