@@ -1,12 +1,36 @@
+import threading
+
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.db import connection
+from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from categories.models import Category, CategoryMember
-from sessions.models import Session, SessionInvite
+from sessions.models import Session, SessionInvite, SessionParticipant
 
 User = get_user_model()
+
+
+def make_user(name):
+    return User.objects.create_user(username=name, email=f"{name}@example.com", password="testpass123")
+
+
+def make_session(**overrides):
+    creator = overrides.pop("creator", None) or User.objects.create_user(
+        username=f"creator-{User.objects.count()}", email=f"creator{User.objects.count()}@example.com",
+        password="testpass123",
+    )
+    defaults = dict(
+        creator=creator,
+        title="Sunday Doubles",
+        session_type=Session.SessionType.DOUBLES,
+        date_time=timezone.now() + timezone.timedelta(days=3),
+        location_text="Sunnyvale Tennis Center",
+        target_size=2,
+    )
+    defaults.update(overrides)
+    return Session.objects.create(**defaults)
 
 
 class SessionCreateViewTests(TestCase):
@@ -188,12 +212,6 @@ class HomeViewOpenToJoinTests(TestCase):
         response = self.client.get(reverse("sessions:home"))
         self.assertNotContains(response, "Own Session")
 
-    def test_my_sessions_placeholder_present(self):
-        self.client.login(username="viewer", password="testpass123")
-        response = self.client.get(reverse("sessions:home"))
-        self.assertContains(response, "My Sessions")
-        self.assertContains(response, "Coming soon")
-
     def test_completed_session_excluded(self):
         session = self.make_session(title="Completed Session")
         SessionInvite.objects.create(session=session, invited_user=self.viewer)
@@ -218,3 +236,240 @@ class LoginRedirectTests(TestCase):
         User.objects.create_user(username="loginredir", email="loginredir@example.com", password="testpass123")
         response = self.client.post(reverse("accounts:login"), {"username": "loginredir", "password": "testpass123"})
         self.assertRedirects(response, reverse("sessions:home"))
+
+
+# ---------------------------------------------------------------------------
+# SessionParticipant view tests
+# ---------------------------------------------------------------------------
+
+class SessionJoinViewTests(TestCase):
+    def setUp(self):
+        self.creator = make_user("join_creator")
+        self.session = make_session(creator=self.creator, target_size=1)
+
+    def test_join_with_room_confirms_immediately(self):
+        joiner = make_user("joiner1")
+        self.client.login(username="joiner1", password="testpass123")
+        response = self.client.post(reverse("sessions:session_join", args=[self.session.pk]))
+        self.assertEqual(response.status_code, 302)
+        participant = SessionParticipant.objects.get(session=self.session, user=joiner)
+        self.assertEqual(participant.status, SessionParticipant.Status.CONFIRMED)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.status, Session.Status.FULL)
+
+    def test_join_when_full_shows_confirmation_without_creating_row(self):
+        SessionParticipant.objects.create(session=self.session, user=make_user("filler"), status=SessionParticipant.Status.CONFIRMED)
+        self.session.sync_status()
+        joiner = make_user("joiner2")
+        self.client.login(username="joiner2", password="testpass123")
+        response = self.client.post(reverse("sessions:session_join", args=[self.session.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "waitlist")
+        self.assertFalse(SessionParticipant.objects.filter(session=self.session, user=joiner).exists())
+
+    def test_post_confirm_waitlist_when_full_creates_waitlisted_row(self):
+        SessionParticipant.objects.create(session=self.session, user=make_user("filler2"), status=SessionParticipant.Status.CONFIRMED)
+        self.session.sync_status()
+        joiner = make_user("joiner3")
+        self.client.login(username="joiner3", password="testpass123")
+        response = self.client.post(reverse("sessions:session_join", args=[self.session.pk]), {"confirm_waitlist": "1"})
+        self.assertEqual(response.status_code, 302)
+        participant = SessionParticipant.objects.get(session=self.session, user=joiner)
+        self.assertEqual(participant.status, SessionParticipant.Status.WAITLISTED)
+        self.assertEqual(participant.position, 1)
+
+    def test_join_cancelled_session_rejected(self):
+        Session.objects.filter(pk=self.session.pk).update(status=Session.Status.CANCELLED)
+        joiner = make_user("joiner4")
+        self.client.login(username="joiner4", password="testpass123")
+        response = self.client.post(reverse("sessions:session_join", args=[self.session.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SessionParticipant.objects.filter(session=self.session, user=joiner).exists())
+
+    def test_duplicate_join_is_noop(self):
+        joiner = make_user("joiner5")
+        self.client.login(username="joiner5", password="testpass123")
+        self.client.post(reverse("sessions:session_join", args=[self.session.pk]))
+        self.client.post(reverse("sessions:session_join", args=[self.session.pk]))
+        self.assertEqual(SessionParticipant.objects.filter(session=self.session, user=joiner).count(), 1)
+
+    def test_creator_cannot_join_own_session(self):
+        self.client.login(username="join_creator", password="testpass123")
+        response = self.client.post(reverse("sessions:session_join", args=[self.session.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SessionParticipant.objects.filter(session=self.session, user=self.creator).exists())
+
+    def test_new_joiner_cannot_skip_existing_waitlist(self):
+        # target_size=1: A confirmed, B waitlisted. A leaves -> a slot opens up,
+        # but B is still waiting. A brand-new joiner C must not skip ahead of B.
+        a = make_user("queue_a")
+        b = make_user("queue_b")
+        c = make_user("queue_c")
+        SessionParticipant.objects.create(session=self.session, user=a, status=SessionParticipant.Status.CONFIRMED)
+        SessionParticipant.objects.create(session=self.session, user=b, status=SessionParticipant.Status.WAITLISTED, position=1)
+        self.session.sync_status()
+
+        self.client.login(username="queue_a", password="testpass123")
+        self.client.post(reverse("sessions:session_leave", args=[self.session.pk]))
+
+        self.client.login(username="queue_c", password="testpass123")
+        response = self.client.post(reverse("sessions:session_join", args=[self.session.pk]), {"confirm_waitlist": "1"})
+        self.assertEqual(response.status_code, 302)
+        c_participant = SessionParticipant.objects.get(session=self.session, user=c)
+        self.assertEqual(c_participant.status, SessionParticipant.Status.WAITLISTED)
+        self.assertEqual(c_participant.position, 2)
+
+
+class ConcurrentJoinTests(TransactionTestCase):
+    def test_concurrent_joins_serialize_correctly(self):
+        session = make_session(target_size=1)
+        users = [make_user(f"racer{i}") for i in range(5)]
+        status_codes = []
+        lock = threading.Lock()
+
+        def attempt_join(username):
+            try:
+                client = Client()
+                client.login(username=username, password="testpass123")
+                response = client.post(reverse("sessions:session_join", args=[session.pk]))
+                if response.status_code == 200:
+                    # Session was full by the time this request got the lock —
+                    # follow the real two-step flow and confirm the waitlist.
+                    response = client.post(
+                        reverse("sessions:session_join", args=[session.pk]), {"confirm_waitlist": "1"}
+                    )
+                with lock:
+                    status_codes.append(response.status_code)
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=attempt_join, args=(u.username,)) for u in users]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertTrue(all(code == 302 for code in status_codes), status_codes)
+        confirmed = SessionParticipant.objects.filter(session=session, status=SessionParticipant.Status.CONFIRMED)
+        waitlisted = SessionParticipant.objects.filter(
+            session=session, status=SessionParticipant.Status.WAITLISTED
+        ).order_by("position")
+        self.assertEqual(confirmed.count(), 1)
+        self.assertEqual(list(waitlisted.values_list("position", flat=True)), [1, 2, 3, 4])
+
+
+class SessionLeaveViewTests(TestCase):
+    def setUp(self):
+        self.creator = make_user("leave_creator")
+        self.session = make_session(creator=self.creator, target_size=1)
+
+    def test_confirmed_leave_frees_spot_and_flips_full_to_open(self):
+        joiner = make_user("leaver1")
+        SessionParticipant.objects.create(session=self.session, user=joiner, status=SessionParticipant.Status.CONFIRMED)
+        self.session.sync_status()
+        self.assertEqual(self.session.status, Session.Status.FULL)
+        self.client.login(username="leaver1", password="testpass123")
+        response = self.client.post(reverse("sessions:session_leave", args=[self.session.pk]))
+        self.assertEqual(response.status_code, 302)
+        participant = SessionParticipant.objects.get(session=self.session, user=joiner)
+        self.assertEqual(participant.status, SessionParticipant.Status.LEFT)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.status, Session.Status.OPEN)
+
+    def test_waitlisted_leave_recompacts_positions(self):
+        w1 = make_user("wleaver1")
+        w2 = make_user("wleaver2")
+        SessionParticipant.objects.create(session=self.session, user=w1, status=SessionParticipant.Status.WAITLISTED, position=1)
+        p2 = SessionParticipant.objects.create(session=self.session, user=w2, status=SessionParticipant.Status.WAITLISTED, position=2)
+        self.client.login(username="wleaver1", password="testpass123")
+        self.client.post(reverse("sessions:session_leave", args=[self.session.pk]))
+        p2.refresh_from_db()
+        self.assertEqual(p2.position, 1)
+
+    def test_non_participant_leave_is_noop(self):
+        stranger = make_user("stranger1")
+        self.client.login(username="stranger1", password="testpass123")
+        response = self.client.post(reverse("sessions:session_leave", args=[self.session.pk]))
+        self.assertEqual(response.status_code, 302)
+
+
+class SessionRemoveParticipantViewTests(TestCase):
+    def setUp(self):
+        self.creator = make_user("remove_creator")
+        self.other = make_user("remove_other")
+        self.session = make_session(creator=self.creator, target_size=1)
+        self.participant = SessionParticipant.objects.create(
+            session=self.session, user=make_user("removee"), status=SessionParticipant.Status.CONFIRMED
+        )
+        self.session.sync_status()
+
+    def test_creator_can_remove_confirmed_participant(self):
+        self.client.login(username="remove_creator", password="testpass123")
+        response = self.client.post(
+            reverse("sessions:session_remove_participant", args=[self.session.pk, self.participant.pk])
+        )
+        self.assertEqual(response.status_code, 302)
+        self.participant.refresh_from_db()
+        self.assertEqual(self.participant.status, SessionParticipant.Status.REMOVED)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.status, Session.Status.OPEN)
+
+    def test_non_creator_cannot_remove_participant(self):
+        self.client.login(username="remove_other", password="testpass123")
+        response = self.client.post(
+            reverse("sessions:session_remove_participant", args=[self.session.pk, self.participant.pk])
+        )
+        self.assertEqual(response.status_code, 404)
+        self.participant.refresh_from_db()
+        self.assertEqual(self.participant.status, SessionParticipant.Status.CONFIRMED)
+
+    def test_double_remove_is_graceful_not_404(self):
+        self.client.login(username="remove_creator", password="testpass123")
+        remove_url = reverse("sessions:session_remove_participant", args=[self.session.pk, self.participant.pk])
+        self.client.post(remove_url)
+        response = self.client.post(remove_url)
+        self.assertEqual(response.status_code, 302)
+
+
+class HomeViewMySessionsTests(TestCase):
+    def setUp(self):
+        self.viewer = make_user("my_sessions_viewer")
+        self.creator = make_user("my_sessions_creator")
+
+    def test_confirmed_session_shows_in_my_sessions(self):
+        session = make_session(creator=self.creator, title="My Confirmed Session")
+        SessionParticipant.objects.create(session=session, user=self.viewer, status=SessionParticipant.Status.CONFIRMED)
+        self.client.login(username="my_sessions_viewer", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertContains(response, "My Confirmed Session")
+
+    def test_waitlisted_session_shows_in_my_sessions(self):
+        session = make_session(creator=self.creator, title="My Waitlisted Session")
+        SessionParticipant.objects.create(session=session, user=self.viewer, status=SessionParticipant.Status.WAITLISTED, position=1)
+        self.client.login(username="my_sessions_viewer", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertContains(response, "My Waitlisted Session")
+
+    def test_left_session_does_not_show_in_my_sessions(self):
+        session = make_session(creator=self.creator, title="My Left Session")
+        SessionParticipant.objects.create(session=session, user=self.viewer, status=SessionParticipant.Status.LEFT)
+        self.client.login(username="my_sessions_viewer", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertNotContains(response, "My Left Session")
+
+    def test_creator_own_session_not_in_my_sessions(self):
+        make_session(creator=self.creator, title="Created Not Joined Session")
+        self.client.login(username="my_sessions_creator", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertNotContains(response, "Created Not Joined Session")
+
+    def test_cancelled_session_still_shown_in_my_sessions(self):
+        # Intentional, unlike Open to Join: My Sessions is roster history, not
+        # just active invites — a session you joined that got cancelled is
+        # still meaningful to see.
+        session = make_session(creator=self.creator, title="My Cancelled Session")
+        SessionParticipant.objects.create(session=session, user=self.viewer, status=SessionParticipant.Status.CONFIRMED)
+        Session.objects.filter(pk=session.pk).update(status=Session.Status.CANCELLED)
+        self.client.login(username="my_sessions_viewer", password="testpass123")
+        response = self.client.get(reverse("sessions:home"))
+        self.assertContains(response, "My Cancelled Session")

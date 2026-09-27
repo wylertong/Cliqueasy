@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">{{ session.title }} is full</h1>
+<p class="text-gray-600 mb-4">This session has reached its target size of {{ session.target_size }}. Would you like to join the waitlist instead?</p>
+<form method="post" action="{% url 'sessions:session_join' session.pk %}">
+    {% csrf_token %}
+    <input type="hidden" name="confirm_waitlist" value="1">
+    <button type="submit" class="bg-indigo-600 text-white px-3 py-1.5 rounded text-sm">Join waitlist</button>
+    <a href="{% url 'sessions:session_detail' session.pk %}" class="ml-3 text-sm text-gray-500">Cancel</a>
+</form>
+{% endblock %}

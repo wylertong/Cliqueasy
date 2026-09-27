@@ -6,7 +6,7 @@
     <div><dt class="text-sm text-gray-500">Type</dt><dd>{{ session.get_session_type_display }}</dd></div>
     <div><dt class="text-sm text-gray-500">When</dt><dd>{{ session.date_time }}</dd></div>
     <div><dt class="text-sm text-gray-500">Where</dt><dd>{{ session.location_text }}</dd></div>
-    <div><dt class="text-sm text-gray-500">Target size</dt><dd>{{ session.target_size }} (0 confirmed)</dd></div>
+    <div><dt class="text-sm text-gray-500">Target size</dt><dd>{{ session.target_size }} ({{ confirmed_count }} confirmed)</dd></div>
     <div><dt class="text-sm text-gray-500">Status</dt><dd>{{ session.get_status_display }}</dd></div>
     <div><dt class="text-sm text-gray-500">Waitlist mode</dt><dd>{{ session.get_waitlist_mode_display }}</dd></div>
     <div><dt class="text-sm text-gray-500">Offer window</dt><dd>{{ session.waitlist_offer_window_minutes }} minutes</dd></div>
@@ -17,6 +17,55 @@
 {% if session.creator == user %}
     <a href="{% url 'sessions:session_edit' session.pk %}" class="text-indigo-600">Edit session</a>
 {% endif %}
+{% if session.creator != user and session.status != "cancelled" and session.status != "completed" %}
+    <div class="mt-4">
+        {% if viewer_participant %}
+            <form method="post" action="{% url 'sessions:session_leave' session.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="bg-gray-200 px-3 py-1.5 rounded text-sm">
+                    Leave ({{ viewer_participant.get_status_display }})
+                </button>
+            </form>
+        {% else %}
+            <form method="post" action="{% url 'sessions:session_join' session.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="bg-indigo-600 text-white px-3 py-1.5 rounded text-sm">
+                    {% if is_full %}Join Waitlist{% else %}Join{% endif %}
+                </button>
+            </form>
+        {% endif %}
+    </div>
+{% endif %}
+<section class="mt-6 border-t border-gray-200 pt-4">
+    <h2 class="text-lg font-semibold mb-2">Roster</h2>
+    <ul class="space-y-1 mb-4 text-sm text-gray-600">
+        {% for p in confirmed_participants %}
+            <li>{{ p.user }}
+                {% if session.creator == user %}
+                <form method="post" action="{% url 'sessions:session_remove_participant' session.pk p.pk %}" class="inline">
+                    {% csrf_token %}<button type="submit" class="text-red-600 text-sm ml-2">Remove</button>
+                </form>
+                {% endif %}
+            </li>
+        {% empty %}
+            <li class="text-gray-500">No confirmed participants yet.</li>
+        {% endfor %}
+    </ul>
+    <h2 class="text-lg font-semibold mb-2">Waitlist</h2>
+    <ul class="space-y-1 mb-4 text-sm text-gray-600">
+        {% for p in waitlisted_participants %}
+            <li>#{{ p.position }} — {{ p.user }}
+                {% if session.creator == user %}
+                <form method="post" action="{% url 'sessions:session_remove_participant' session.pk p.pk %}" class="inline">
+                    {% csrf_token %}<button type="submit" class="text-red-600 text-sm ml-2">Remove</button>
+                </form>
+                {% endif %}
+            </li>
+        {% empty %}
+            <li class="text-gray-500">No one on the waitlist.</li>
+        {% endfor %}
+    </ul>
+</section>
 {% if session.creator == user %}
 <section class="mt-6 border-t border-gray-200 pt-4">
     <h2 class="text-lg font-semibold mb-2">Invites</h2>

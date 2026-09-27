@@ -4,7 +4,16 @@
 
 <section class="mb-8">
     <h2 class="text-lg font-semibold mb-2">My Sessions</h2>
-    <p class="text-gray-500 text-sm">Coming soon — once joining is available, sessions you've joined or are waitlisted for will show up here.</p>
+    <ul class="space-y-2">
+        {% for session in my_sessions %}
+            <li class="border border-gray-200 rounded p-3">
+                <a href="{% url 'sessions:session_detail' session.pk %}" class="font-medium hover:text-indigo-600">{{ session.title }}</a>
+                <div class="text-sm text-gray-500">{{ session.date_time }} · {{ session.location_text }} · {{ session.get_status_display }}</div>
+            </li>
+        {% empty %}
+            <li class="text-gray-500">You haven't joined or waitlisted for any sessions yet.</li>
+        {% endfor %}
+    </ul>
 </section>
 
 <section>

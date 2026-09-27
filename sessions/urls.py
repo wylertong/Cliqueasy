@@ -11,4 +11,11 @@ urlpatterns = [
     path("<int:pk>/edit/", views.SessionUpdateView.as_view(), name="session_edit"),
     path("<int:pk>/invites/category/", views.InviteCategoryView.as_view(), name="invite_category"),
     path("<int:pk>/invites/users/", views.InviteUsersView.as_view(), name="invite_users"),
+    path("<int:pk>/join/", views.SessionJoinView.as_view(), name="session_join"),
+    path("<int:pk>/leave/", views.SessionLeaveView.as_view(), name="session_leave"),
+    path(
+        "<int:pk>/participants/<int:participant_pk>/remove/",
+        views.SessionRemoveParticipantView.as_view(),
+        name="session_remove_participant",
+    ),
 ]
